@@ -18,7 +18,7 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 - **Probable Conditions**: Get a list of possible medical conditions with probability ratings
 - **Smart Recommendations**: Receive actionable next steps categorized by priority
 - **Emergency Detection**: Automatic identification of emergency symptoms with urgent warnings
-- **Query History**: Track previous symptom queries with SQLite database
+- **Query History**: Track previous symptom queries with MongoDB (optional)
 - **Safety-First Design**: Comprehensive disclaimers and safety warnings throughout
 - **Modern UI**: Clean, responsive React interface with intuitive design
 
@@ -121,9 +121,9 @@ Use `https://<project>.vercel.app/health` and `https://<project>.vercel.app/api/
 
 ### Optional: Node.js + Express + Mongo backend
 
-This repo also includes a parallel Node backend you can deploy to Vercel.
+This repo includes a Node backend you can deploy to Vercel.
 
-Endpoints (same shape as Python backend):
+Endpoints:
 - POST `/api/check-symptoms`
 - GET `/api/history`
 - GET `/api/query/:id`
@@ -146,8 +146,7 @@ Env vars for Node backend:
 - ENABLE_DB=0 (or 1 if using Mongo)
 - MONGO_URL=mongodb+srv://<user>:<pass>@<cluster>/<db>?retryWrites=true&w=majority
 
-On Vercel (already configured in `vercel.json`), requests to `/api/node` will go to Node backend,
-and everything else to the Python backend entry by default.
+On Vercel (already configured in `vercel.json`), requests to `/api/node` go to the Node backend entry.
 
 ## 📖 API Documentation
 
@@ -217,10 +216,11 @@ GOOGLE_API_KEY=your_key_here
 LLM_PROVIDER=google
 GOOGLE_MODEL=gemini-1.5-flash
 
-# Database
-DATABASE_URL=sqlite+aiosqlite:///./symptom_checker.db
+# Database (optional)
+ENABLE_DB=0
+MONGO_URL=mongodb://localhost:27017/symptom_checker
 
-# Server
+# Server (local dev)
 PORT=8000
 ```
 
@@ -341,7 +341,7 @@ healthcare-symptom-checker/
    - Display query history
 
 4. **Technical Overview** (1 minute)
-   - Show API documentation at /docs
+  - Hit `/health` to show configuration
    - Quick code walkthrough
    - Database query history
    - LLM integration explanation
@@ -377,21 +377,21 @@ Expected: Emergency warning, immediate medical attention recommended
 
 ### Deployment
 
-For this assignment-ready version, local run is the primary path. If you deploy, use your preferred platform and the standard FastAPI/React deployment guides.
+This project is optimized for Vercel (Node serverless) as described above. You can also deploy the Node backend to any Node hosting provider and serve the React frontend with any static host.
 
 ## 🛠️ Development
 
 ### Adding New Features
 
-1. **New LLM Provider**: Edit `llm_service.py` and add provider logic
-2. **New Endpoints**: Add routes in `main.py`
+1. **New LLM Provider**: Edit `node-backend/src/app.js` (see `analyzeSymptoms`) and add provider logic
+2. **New Endpoints**: Add Express routes in `node-backend/src/app.js`
 3. **UI Components**: Create in `frontend/src/components/`
-4. **Database Models**: Modify `database.py`
+4. **Database Models**: Extend the Mongoose schema in `node-backend/src/app.js` or introduce a models file
 
 ### Code Quality
 
-- Backend follows PEP 8 style guidelines
-- Frontend uses React best practices
+- Backend: Node + Express best practices (optional ESLint/Prettier)
+- Frontend: React best practices
 - Async/await for all database and LLM operations
 - Comprehensive error handling
 
@@ -411,7 +411,7 @@ This is an educational project. Key areas for improvement:
 ## 📧 Support
 
 For issues or questions:
-1. Check the API documentation at `/docs`
+1. Use `/health` to verify configuration and status
 2. Review the disclaimer and safety information
 3. Consult the code comments for implementation details
 
