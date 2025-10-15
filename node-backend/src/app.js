@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 dotenv.config();
 
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '1');
+const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
 const app = express();
@@ -45,11 +46,45 @@ app.get('/api/disclaimer', (req, res) => {
 // LLM integration via OpenAI SDK
 async function analyzeSymptoms({ symptoms, age, gender }) {
   const provider = process.env.LLM_PROVIDER || 'openai';
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
+  if (NO_LLM || !apiKey) {
+    const lower = (symptoms || '').toLowerCase();
+    const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
+    const conditions = likelyCold
+      ? [
+          {
+            name: 'Common Cold',
+            probability: 'Medium',
+            description: 'A mild viral upper respiratory infection that usually resolves on its own.',
+            common_symptoms: ['sore throat', 'runny nose', 'cough']
+          }
+        ]
+      : [
+          {
+            name: 'Non-specific symptoms',
+            probability: 'Low',
+            description: 'Insufficient information to suggest a specific condition.',
+            common_symptoms: []
+          }
+        ];
+    return {
+      probable_conditions: conditions,
+      recommendations: [
+        {
+          category: 'Self-Care',
+          action: 'Rest, stay hydrated, and monitor symptoms. Seek professional care if symptoms worsen.',
+          priority: 'Low'
+        }
+      ],
+      emergency_warning: null
+    };
+  }
+
   if (provider !== 'openai') {
     throw new Error('Node backend currently supports LLM_PROVIDER=openai');
   }
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY is required');
   const { OpenAI } = await import('openai');
   const client = new OpenAI({ apiKey });
 
