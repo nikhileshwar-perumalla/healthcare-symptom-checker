@@ -9,6 +9,8 @@ dotenv.config();
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
 let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
+const LLM_CONFIGURED = !!process.env.OPENAI_API_KEY && !NO_LLM && LLM_PROVIDER === 'openai';
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
 const app = express();
@@ -38,7 +40,15 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', message: 'API is operational', db_enabled: ENABLE_DB, db_ready: DB_READY });
+  res.json({
+    status: 'healthy',
+    message: 'API is operational',
+    db_enabled: ENABLE_DB,
+    db_ready: DB_READY,
+    llm_provider: LLM_PROVIDER,
+    llm_configured: LLM_CONFIGURED,
+    llm_mode: NO_LLM ? 'stub' : (LLM_CONFIGURED ? 'live' : 'stub')
+  });
 });
 
 app.get('/api/disclaimer', (req, res) => {
@@ -47,7 +57,7 @@ app.get('/api/disclaimer', (req, res) => {
 
 // LLM integration via OpenAI SDK
 async function analyzeSymptoms({ symptoms, age, gender }) {
-  const provider = process.env.LLM_PROVIDER || 'openai';
+  const provider = LLM_PROVIDER;
   const apiKey = process.env.OPENAI_API_KEY;
 
   // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
@@ -131,15 +141,53 @@ Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-foc
     .filter(Boolean)
     .join('\n');
 
-  const response = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
-    temperature: 0.3,
-    max_tokens: 2000,
-  });
+  let response;
+  try {
+    response = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 2000,
+    });
+  } catch (err) {
+    const code = err?.status || err?.code || err?.error?.type || 'unknown_error';
+    const isQuota = code === 429 || String(code).includes('quota') || String(code).includes('rate');
+    const lower = (symptoms || '').toLowerCase();
+    const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
+    const conditions = likelyCold
+      ? [
+          {
+            name: 'Common Cold (heuristic) — LLM unavailable',
+            probability: 'Medium',
+            description: 'Educational heuristic used due to temporary LLM unavailability.',
+            common_symptoms: ['sore throat', 'runny nose', 'cough']
+          }
+        ]
+      : [
+          {
+            name: 'Non-specific symptoms (heuristic) — LLM unavailable',
+            probability: 'Low',
+            description: 'Educational heuristic used due to temporary LLM unavailability.',
+            common_symptoms: []
+          }
+        ];
+    return {
+      probable_conditions: conditions,
+      recommendations: [
+        {
+          category: 'Follow-up',
+          action: isQuota
+            ? 'The AI service hit a rate/quota limit. Please try again shortly. For concerns, consult a healthcare professional.'
+            : 'The AI service is temporarily unavailable. Please try again later. For concerns, consult a healthcare professional.',
+          priority: 'Medium'
+        }
+      ],
+      emergency_warning: null
+    };
+  }
 
   const text = response.choices?.[0]?.message?.content ?? '{}';
   try {
