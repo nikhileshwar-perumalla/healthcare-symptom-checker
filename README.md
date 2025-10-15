@@ -27,7 +27,7 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 ### Backend (Node.js + Express)
 - **Framework**: Express
 - **Database**: MongoDB (optional) via Mongoose
-- **LLM Integration**: OpenAI (Node SDK)
+- **LLM Integration**: Google AI Studio (Gemini)
 - **API Endpoints**:
   - `POST /api/check-symptoms` - Analyze symptoms
   - `GET /api/history` - Get query history
@@ -49,7 +49,7 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 ### Prerequisites
 
 - Node.js 18 or higher
-- OpenAI API key
+- Google AI Studio API key
 
 ### Backend Setup (Node)
 
@@ -65,8 +65,9 @@ cp .env.example .env
 
 3. Edit `.env` and set:
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
-LLM_PROVIDER=openai
+GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_MODEL=gemini-1.5-flash
+LLM_PROVIDER=google
 ENABLE_DB=0
 MONGO_URL=mongodb://localhost:27017/symptom_checker  # if ENABLE_DB=1
 ```
@@ -109,8 +110,9 @@ Steps:
 1. Push this repo to GitHub (done)
 2. Import into Vercel and deploy
 3. Set environment variables:
-  - `LLM_PROVIDER` = `openai`
-  - `OPENAI_API_KEY` = your key
+  - `LLM_PROVIDER` = `google`
+  - `GOOGLE_API_KEY` = your key
+  - `GOOGLE_MODEL` = `gemini-1.5-flash` (or your chosen Gemini model)
   - `ENABLE_DB` = `0` (or `1` with Mongo)
   - `MONGO_URL` = your Mongo connection string (if `ENABLE_DB=1`)
 
@@ -138,8 +140,9 @@ npm run dev
 ```
 
 Env vars for Node backend:
-- LLM_PROVIDER=openai (Node path supports OpenAI)
-- OPENAI_API_KEY=...
+- LLM_PROVIDER=google (Node path supports Google Gemini)
+- GOOGLE_API_KEY=...
+- GOOGLE_MODEL=gemini-1.5-flash
 - ENABLE_DB=0 (or 1 if using Mongo)
 - MONGO_URL=mongodb+srv://<user>:<pass>@<cluster>/<db>?retryWrites=true&w=majority
 
@@ -209,14 +212,10 @@ and everything else to the Python backend entry by default.
 
 **Backend (.env)**:
 ```env
-# LLM Provider Configuration
-OPENAI_API_KEY=your_key_here
-ANTHROPIC_API_KEY=your_key_here
-LLM_PROVIDER=openai  # or anthropic
-
-# Model Selection
-OPENAI_MODEL=gpt-4-turbo-preview
-ANTHROPIC_MODEL=claude-3-sonnet-20240229
+# LLM Provider Configuration (Google only)
+GOOGLE_API_KEY=your_key_here
+LLM_PROVIDER=google
+GOOGLE_MODEL=gemini-1.5-flash
 
 # Database
 DATABASE_URL=sqlite+aiosqlite:///./symptom_checker.db
@@ -235,7 +234,7 @@ REACT_APP_API_URL=http://localhost:8000
 ### Test the Backend API
 
 1. Ensure the backend is running
-2. Open `http://localhost:8000/docs` for interactive API documentation
+2. Use the `/health` endpoint to verify configuration
 3. Try the health check endpoint:
 ```bash
 curl http://localhost:8000/health

@@ -9,11 +9,9 @@ dotenv.config();
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
 let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
-const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
-const LLM_CONFIGURED = (
-  (!NO_LLM && LLM_PROVIDER === 'openai' && !!process.env.OPENAI_API_KEY) ||
-  (!NO_LLM && LLM_PROVIDER === 'google' && !!process.env.GOOGLE_API_KEY)
-);
+// Google-only provider
+const LLM_PROVIDER = 'google';
+const LLM_CONFIGURED = !!process.env.GOOGLE_API_KEY && !NO_LLM;
 const ALLOW_CLIENT_API_KEY = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.ALLOW_CLIENT_API_KEY || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
@@ -60,18 +58,11 @@ app.get('/api/disclaimer', (req, res) => {
   res.json({ disclaimer: MEDICAL_DISCLAIMER });
 });
 
-// LLM integration via OpenAI SDK
-async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride, googleKeyOverride }) {
-  const provider = LLM_PROVIDER;
-
+// LLM integration via Google AI Studio (Gemini)
+async function analyzeSymptoms({ symptoms, age, gender, googleKeyOverride }) {
   // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
-  const effectiveOpenAIKey = openaiKeyOverride || process.env.OPENAI_API_KEY;
   const effectiveGoogleKey = googleKeyOverride || process.env.GOOGLE_API_KEY;
-  if (
-    NO_LLM ||
-    (provider === 'openai' && !effectiveOpenAIKey) ||
-    (provider === 'google' && !effectiveGoogleKey)
-  ) {
+  if (NO_LLM || !effectiveGoogleKey) {
     const lower = (symptoms || '').toLowerCase();
     const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
     const conditions = likelyCold
@@ -104,100 +95,11 @@ async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride, googl
     };
   }
 
-  // Google AI Studio (Gemini) path
-  if (provider === 'google') {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const modelName = process.env.GOOGLE_MODEL || 'gemini-1.5-flash';
-    const genAI = new GoogleGenerativeAI(effectiveGoogleKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
-
-    const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
-
-CRITICAL SAFETY RULES:
-1. ALWAYS emphasize that this is for educational purposes only and not medical advice.
-2. ALWAYS recommend consulting a healthcare professional for diagnosis/treatment.
-3. Identify emergency symptoms and urge immediate medical attention when appropriate.
-4. Do NOT provide prescriptions or specific treatments; focus on general guidance.
-5. Be cautious and conservative; prioritize patient safety.
-
-Task: Analyze the provided symptoms and return structured JSON with:
-{
-  "probable_conditions": [
-    {
-      "name": "Condition Name",
-      "probability": "High|Medium|Low",
-      "description": "Brief description",
-      "common_symptoms": ["symptom1", "symptom2"]
-    }
-  ],
-  "recommendations": [
-    {
-      "category": "Immediate Action|Self-Care|Follow-up|Emergency",
-      "action": "Specific recommendation",
-      "priority": "High|Medium|Low"
-    }
-  ],
-  "emergency_warning": "Warning if emergency symptoms detected, otherwise null"
-}
-
-Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-focused, and educational.`;
-
-    const userPrompt = [
-      `Symptoms: ${symptoms}`,
-      age ? `Age: ${age}` : null,
-      gender ? `Gender: ${gender}` : null,
-      '',
-      'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
-    ].filter(Boolean).join('\n');
-
-    const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
-
-    try {
-      const result = await model.generateContent(prompt);
-      const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
-      try {
-        return JSON.parse(text);
-      } catch (_) {
-        const match = (text || '').match(/\{[\s\S]*\}/);
-        if (match) {
-          try { return JSON.parse(match[0]); } catch {}
-        }
-        const lower = (symptoms || '').toLowerCase();
-        const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-        return {
-          probable_conditions: [
-            likelyCold
-              ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
-              : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
-          ],
-          recommendations: [ { category: 'Follow-up', action: 'Please try again later.', priority: 'Low' } ],
-          emergency_warning: null
-        };
-      }
-    } catch (err) {
-      const lower = (symptoms || '').toLowerCase();
-      const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-      return {
-        probable_conditions: [
-          likelyCold
-            ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
-            : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
-        ],
-        recommendations: [ { category: 'Follow-up', action: 'Please try again later or reduce request load.', priority: 'Medium' } ],
-        emergency_warning: null
-      };
-    }
-  }
-
-  // OpenAI path only
-  if (provider !== 'openai') {
-    throw new Error('Node backend currently supports LLM_PROVIDER=openai or google');
-  }
-  const { OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: effectiveOpenAIKey, organization: process.env.OPENAI_ORG || undefined });
-  const MAX_TOKENS = Math.max(200, Math.min(2000, parseInt(process.env.OPENAI_MAX_TOKENS || '900', 10)));
-  const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Google AI Studio (Gemini) path (only)
+  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const modelName = process.env.GOOGLE_MODEL || 'gemini-1.5-flash';
+  const genAI = new GoogleGenerativeAI(effectiveGoogleKey);
+  const model = genAI.getGenerativeModel({ model: modelName });
 
   const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
 
@@ -231,100 +133,48 @@ Task: Analyze the provided symptoms and return structured JSON with:
 Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-focused, and educational.`;
 
   const userPrompt = [
-    `Symptoms: ${symptoms}`,
-    age ? `Age: ${age}` : null,
-    gender ? `Gender: ${gender}` : null,
-    '',
-    'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
-  ]
-    .filter(Boolean)
-    .join('\n');
+      `Symptoms: ${symptoms}`,
+      age ? `Age: ${age}` : null,
+      gender ? `Gender: ${gender}` : null,
+      '',
+      'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
+    ].filter(Boolean).join('\n');
 
-  let response;
+  const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
+
   try {
-    let attempt = 0;
-    while (true) {
-      try {
-        response = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.3,
-          max_tokens: MAX_TOKENS,
-        });
-        break;
-      } catch (e) {
-        const status = e?.status || e?.code;
-        if (status === 429 && attempt < 2) {
-          // Retry with backoff: 400ms, 1000ms
-          await sleep(attempt === 0 ? 400 : 1000);
-          attempt++;
-          continue;
-        }
-        throw e;
+    const result = await model.generateContent(prompt);
+    const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      const match = (text || '').match(/\{[\s\S]*\}/);
+      if (match) {
+        try { return JSON.parse(match[0]); } catch {}
       }
+      const lower = (symptoms || '').toLowerCase();
+      const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
+      return {
+        probable_conditions: [
+          likelyCold
+            ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
+            : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
+        ],
+        recommendations: [ { category: 'Follow-up', action: 'Please try again later.', priority: 'Low' } ],
+        emergency_warning: null
+      };
     }
   } catch (err) {
-    const code = err?.status || err?.code || err?.error?.type || 'unknown_error';
-    const isQuota = code === 429 || String(code).includes('quota') || String(code).includes('rate');
     const lower = (symptoms || '').toLowerCase();
     const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-    const conditions = likelyCold
-      ? [
-          {
-            name: 'Common Cold (heuristic) — LLM unavailable',
-            probability: 'Medium',
-            description: 'Educational heuristic used due to temporary LLM unavailability.',
-            common_symptoms: ['sore throat', 'runny nose', 'cough']
-          }
-        ]
-      : [
-          {
-            name: 'Non-specific symptoms (heuristic) — LLM unavailable',
-            probability: 'Low',
-            description: 'Educational heuristic used due to temporary LLM unavailability.',
-            common_symptoms: []
-          }
-        ];
-    return {
-      probable_conditions: conditions,
-      recommendations: [
-        {
-          category: 'Follow-up',
-          action: isQuota
-            ? 'The AI service hit a rate/quota limit. Please try again shortly. For concerns, consult a healthcare professional.'
-            : 'The AI service is temporarily unavailable. Please try again later. For concerns, consult a healthcare professional.',
-          priority: 'Medium'
-        }
-      ],
-      emergency_warning: null
-    };
-  }
-
-  const text = response.choices?.[0]?.message?.content ?? '{}';
-  try {
-    return JSON.parse(text);
-  } catch (_) {
     return {
       probable_conditions: [
-        {
-          name: 'Unable to parse response',
-          probability: 'Unknown',
-          description:
-            'The system encountered an error analyzing your symptoms. Please consult a healthcare professional.',
-          common_symptoms: [],
-        },
+        likelyCold
+          ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
+          : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
       ],
-      recommendations: [
-        {
-          category: 'Follow-up',
-          action: 'Please consult a healthcare professional for proper evaluation of your symptoms.',
-          priority: 'High',
-        },
-      ],
-      emergency_warning: null,
+      recommendations: [ { category: 'Follow-up', action: 'Please try again later or reduce request load.', priority: 'Medium' } ],
+      emergency_warning: null
     };
   }
 }
@@ -336,16 +186,13 @@ app.post('/api/check-symptoms', async (req, res) => {
       return res.status(422).json({ detail: 'Invalid "symptoms"; must be a string of length >= 3' });
     }
 
-    let openaiKeyOverride = undefined;
     let googleKeyOverride = undefined;
     if (ALLOW_CLIENT_API_KEY) {
-      const oai = req.headers['x-openai-key'];
       const gk = req.headers['x-google-key'];
-      if (typeof oai === 'string' && oai.trim().startsWith('sk-') && oai.trim().length > 20) openaiKeyOverride = oai.trim();
       if (typeof gk === 'string' && gk.trim().length > 20) googleKeyOverride = gk.trim();
     }
 
-    const llm = await analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride, googleKeyOverride });
+    const llm = await analyzeSymptoms({ symptoms, age, gender, googleKeyOverride });
     const conditions = llm.probable_conditions || [];
     const recommendations = llm.recommendations || [];
     const emergency_warning = llm.emergency_warning || null;
