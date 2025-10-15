@@ -24,14 +24,14 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 
 ## 🏗️ Architecture
 
-### Backend (FastAPI)
-- **Framework**: FastAPI with async support
-- **Database**: SQLite with SQLAlchemy ORM
-- **LLM Integration**: OpenAI GPT-4 or Anthropic Claude
+### Backend (Node.js + Express)
+- **Framework**: Express
+- **Database**: MongoDB (optional) via Mongoose
+- **LLM Integration**: OpenAI (Node SDK)
 - **API Endpoints**:
   - `POST /api/check-symptoms` - Analyze symptoms
   - `GET /api/history` - Get query history
-  - `GET /api/query/{id}` - Get specific query
+  - `GET /api/query/:id` - Get specific query
   - `GET /api/disclaimer` - Get medical disclaimer
 
 ### Frontend (React)
@@ -48,47 +48,33 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- Node.js 14 or higher
-- OpenAI API key OR Anthropic API key
+- Node.js 18 or higher
+- OpenAI API key
 
-### Backend Setup
+### Backend Setup (Node)
 
-1. Navigate to the backend directory:
+1. Navigate to the Node backend:
 ```bash
-cd backend
+cd node-backend
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Create `.env` file from example:
+2. Create `.env` from example and configure keys:
 ```bash
 cp .env.example .env
 ```
 
-5. Edit `.env` and add your API key:
+3. Edit `.env` and set:
 ```env
-# For OpenAI
 OPENAI_API_KEY=your_openai_api_key_here
 LLM_PROVIDER=openai
-
-# OR for Anthropic
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-LLM_PROVIDER=anthropic
+ENABLE_DB=0
+MONGO_URL=mongodb://localhost:27017/symptom_checker  # if ENABLE_DB=1
 ```
 
-6. Run the backend server:
+4. Install and run:
 ```bash
-python main.py
+npm install
+npm run dev
 ```
 
 The backend API will be available at `http://localhost:8000`
@@ -112,28 +98,24 @@ npm start
 
 The frontend will open automatically at `http://localhost:3000`
 
-## ☁️ Deploy Backend on Vercel
+## ☁️ Deploy Backend on Vercel (Node)
 
-This repo includes Vercel configuration to deploy the FastAPI backend using the `@vercel/python` runtime.
+This repo is configured to deploy the Node/Express backend via `@vercel/node`.
 
-What’s included:
-- `api/index.py` exposes the FastAPI `app` for Vercel
-- `vercel.json` routes all requests to the FastAPI app
-- Root `requirements.txt` that points to backend requirements
-- Optional DB: You can disable DB usage for serverless with `ENABLE_DB=0`
+Routes:
+- All routes go to `/api/node.js` (Express app)
 
 Steps:
 1. Push this repo to GitHub (done)
-2. In Vercel, import the repo and deploy
-3. Set Environment Variables (Project Settings → Environment Variables):
-   - `LLM_PROVIDER` = `openai` (or `anthropic`)
-   - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` accordingly
-   - `ENABLE_DB` = `0` (recommended for initial serverless deployment)
-   - Optionally if you enable DB later:
-     - `DATABASE_URL` (e.g., PostgreSQL on Neon/Supabase)
+2. Import into Vercel and deploy
+3. Set environment variables:
+  - `LLM_PROVIDER` = `openai`
+  - `OPENAI_API_KEY` = your key
+  - `ENABLE_DB` = `0` (or `1` with Mongo)
+  - `MONGO_URL` = your Mongo connection string (if `ENABLE_DB=1`)
 
-After deploy, Vercel will give you a URL like `https://<project>.vercel.app`. 
-Open `https://<project>.vercel.app/docs` to see interactive API docs.
+After deploy, Vercel will give you a URL like `https://<project>.vercel.app`.
+Use `https://<project>.vercel.app/health` and `https://<project>.vercel.app/api/check-symptoms` to test.
 
 ### Optional: Node.js + Express + Mongo backend
 
@@ -311,17 +293,16 @@ The system uses a carefully crafted system prompt that:
 
 ## 📁 Project Structure
 
-This repository is intentionally minimal for assignment submission. The essential files you need are:
-
 ```
 healthcare-symptom-checker/
-├── backend/
-│   ├── main.py              # FastAPI application
-│   ├── database.py          # Database models and configuration
-│   ├── models.py            # Pydantic models
-│   ├── llm_service.py       # LLM integration service
-│   ├── requirements.txt     # Python dependencies
-│   └── .env.example         # Environment template
+├── api/
+│   └── node.js               # Vercel serverless entry (Node)
+├── node-backend/
+│   ├── package.json
+│   ├── .env.example
+│   └── src/
+│       ├── app.js            # Express app with routes
+│       └── server.js         # Local dev server
 ├── frontend/
 │   ├── public/
 │   │   └── index.html
@@ -336,6 +317,7 @@ healthcare-symptom-checker/
 │   │   ├── api.js
 │   │   └── index.js
 │   └── package.json
+├── vercel.json
 └── README.md
 ```
 
