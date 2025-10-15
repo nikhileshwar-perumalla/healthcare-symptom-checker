@@ -135,6 +135,35 @@ Steps:
 After deploy, Vercel will give you a URL like `https://<project>.vercel.app`. 
 Open `https://<project>.vercel.app/docs` to see interactive API docs.
 
+### Optional: Node.js + Express + Mongo backend
+
+This repo also includes a parallel Node backend you can deploy to Vercel.
+
+Endpoints (same shape as Python backend):
+- POST `/api/check-symptoms`
+- GET `/api/history`
+- GET `/api/query/:id`
+- GET `/api/disclaimer`
+
+Vercel route for Node backend:
+- `/api/node` (the Node serverless entry)
+
+Local run:
+```
+cd node-backend
+npm install
+npm run dev
+```
+
+Env vars for Node backend:
+- LLM_PROVIDER=openai (Node path supports OpenAI)
+- OPENAI_API_KEY=...
+- ENABLE_DB=0 (or 1 if using Mongo)
+- MONGO_URL=mongodb+srv://<user>:<pass>@<cluster>/<db>?retryWrites=true&w=majority
+
+On Vercel (already configured in `vercel.json`), requests to `/api/node` will go to Node backend,
+and everything else to the Python backend entry by default.
+
 ## 📖 API Documentation
 
 ### Check Symptoms
