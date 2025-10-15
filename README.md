@@ -399,3 +399,4 @@ For issues or questions:
 ---
 
 **Built with ❤️ for educational purposes. Always consult healthcare professionals for medical advice.**
+# healthcare-symptom-checker
