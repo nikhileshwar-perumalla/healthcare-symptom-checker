@@ -112,6 +112,29 @@ npm start
 
 The frontend will open automatically at `http://localhost:3000`
 
+## ☁️ Deploy Backend on Vercel
+
+This repo includes Vercel configuration to deploy the FastAPI backend using the `@vercel/python` runtime.
+
+What’s included:
+- `api/index.py` exposes the FastAPI `app` for Vercel
+- `vercel.json` routes all requests to the FastAPI app
+- Root `requirements.txt` that points to backend requirements
+- Optional DB: You can disable DB usage for serverless with `ENABLE_DB=0`
+
+Steps:
+1. Push this repo to GitHub (done)
+2. In Vercel, import the repo and deploy
+3. Set Environment Variables (Project Settings → Environment Variables):
+   - `LLM_PROVIDER` = `openai` (or `anthropic`)
+   - `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` accordingly
+   - `ENABLE_DB` = `0` (recommended for initial serverless deployment)
+   - Optionally if you enable DB later:
+     - `DATABASE_URL` (e.g., PostgreSQL on Neon/Supabase)
+
+After deploy, Vercel will give you a URL like `https://<project>.vercel.app`. 
+Open `https://<project>.vercel.app/docs` to see interactive API docs.
+
 ## 📖 API Documentation
 
 ### Check Symptoms

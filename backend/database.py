@@ -9,9 +9,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./symptom_checker.db")
+ENABLE_DB = os.getenv("ENABLE_DB", "1") not in ["0", "false", "False", "no", "No"]
 
-engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+engine = create_async_engine(DATABASE_URL, echo=True) if ENABLE_DB else None
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False) if ENABLE_DB else None
 Base = declarative_base()
 
 
@@ -29,12 +30,16 @@ class SymptomQuery(Base):
 
 
 async def init_db():
-    """Initialize database tables"""
+    """Initialize database tables (no-op when DB disabled)."""
+    if not ENABLE_DB:
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db():
-    """Dependency for getting database session"""
+    """Dependency for getting database session (raises if DB disabled)."""
+    if not ENABLE_DB:
+        raise RuntimeError("Database is disabled (set ENABLE_DB=1 to enable)")
     async with AsyncSessionLocal() as session:
         yield session

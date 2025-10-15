@@ -6,7 +6,7 @@ import json
 import uuid
 from datetime import datetime
 
-from database import init_db, get_db, SymptomQuery
+from database import init_db, get_db, SymptomQuery, ENABLE_DB
 from models import (
     SymptomInput, SymptomResponse, Condition, Recommendation,
     QueryHistory, HealthResponse
@@ -44,7 +44,7 @@ This service is not intended to diagnose, treat, cure, or prevent any disease.
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database on startup (no-op if DB disabled)."""
     await init_db()
 
 
@@ -69,7 +69,7 @@ async def health_check():
 @app.post("/api/check-symptoms", response_model=SymptomResponse)
 async def check_symptoms(
     symptom_input: SymptomInput,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession | None = Depends(get_db) if ENABLE_DB else None
 ):
     """
     Analyze symptoms and provide probable conditions with recommendations
@@ -98,25 +98,24 @@ async def check_symptoms(
             emergency_warning=emergency_warning
         )
         
-        # Save to database
-        session_id = symptom_input.session_id or str(uuid.uuid4())
-        db_query = SymptomQuery(
-            symptoms=symptom_input.symptoms,
-            response=json.dumps({
-                "probable_conditions": [c.dict() for c in conditions],
-                "recommendations": [r.dict() for r in recommendations],
-                "emergency_warning": emergency_warning
-            }),
-            conditions=json.dumps([c.dict() for c in conditions]),
-            recommendations=json.dumps([r.dict() for r in recommendations]),
-            session_id=session_id
-        )
-        
-        db.add(db_query)
-        await db.commit()
-        await db.refresh(db_query)
-        
-        response.query_id = db_query.id
+        # Save to database if enabled
+        if ENABLE_DB and db is not None:
+            session_id = symptom_input.session_id or str(uuid.uuid4())
+            db_query = SymptomQuery(
+                symptoms=symptom_input.symptoms,
+                response=json.dumps({
+                    "probable_conditions": [c.dict() for c in conditions],
+                    "recommendations": [r.dict() for r in recommendations],
+                    "emergency_warning": emergency_warning
+                }),
+                conditions=json.dumps([c.dict() for c in conditions]),
+                recommendations=json.dumps([r.dict() for r in recommendations]),
+                session_id=session_id
+            )
+            db.add(db_query)
+            await db.commit()
+            await db.refresh(db_query)
+            response.query_id = db_query.id
         
         return response
         
@@ -131,7 +130,7 @@ async def check_symptoms(
 async def get_history(
     limit: int = 10,
     session_id: str = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession | None = Depends(get_db) if ENABLE_DB else None
 ):
     """
     Retrieve query history
@@ -141,6 +140,8 @@ async def get_history(
         session_id: Filter by session ID (optional)
     """
     try:
+        if not ENABLE_DB or db is None:
+            return []
         query = select(SymptomQuery).order_by(SymptomQuery.created_at.desc()).limit(limit)
         
         if session_id:
@@ -173,9 +174,11 @@ async def get_history(
 
 
 @app.get("/api/query/{query_id}", response_model=SymptomResponse)
-async def get_query(query_id: int, db: AsyncSession = Depends(get_db)):
+async def get_query(query_id: int, db: AsyncSession | None = Depends(get_db) if ENABLE_DB else None):
     """Retrieve a specific query by ID"""
     try:
+        if not ENABLE_DB or db is None:
+            raise HTTPException(status_code=404, detail="Query not found (DB disabled)")
         query = select(SymptomQuery).where(SymptomQuery.id == query_id)
         result = await db.execute(query)
         db_query = result.scalar_one_or_none()
