@@ -9,8 +9,11 @@ dotenv.config();
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
 let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
-const LLM_CONFIGURED = !!process.env.OPENAI_API_KEY && !NO_LLM && LLM_PROVIDER === 'openai';
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+const LLM_CONFIGURED = (
+  (!NO_LLM && LLM_PROVIDER === 'openai' && !!process.env.OPENAI_API_KEY) ||
+  (!NO_LLM && LLM_PROVIDER === 'google' && !!process.env.GOOGLE_API_KEY)
+);
 const ALLOW_CLIENT_API_KEY = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.ALLOW_CLIENT_API_KEY || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
@@ -58,12 +61,17 @@ app.get('/api/disclaimer', (req, res) => {
 });
 
 // LLM integration via OpenAI SDK
-async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride }) {
+async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride, googleKeyOverride }) {
   const provider = LLM_PROVIDER;
 
   // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
-  const effectiveKey = openaiKeyOverride || process.env.OPENAI_API_KEY;
-  if (NO_LLM || !effectiveKey) {
+  const effectiveOpenAIKey = openaiKeyOverride || process.env.OPENAI_API_KEY;
+  const effectiveGoogleKey = googleKeyOverride || process.env.GOOGLE_API_KEY;
+  if (
+    NO_LLM ||
+    (provider === 'openai' && !effectiveOpenAIKey) ||
+    (provider === 'google' && !effectiveGoogleKey)
+  ) {
     const lower = (symptoms || '').toLowerCase();
     const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
     const conditions = likelyCold
@@ -96,12 +104,97 @@ async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride }) {
     };
   }
 
+  // Google AI Studio (Gemini) path
+  if (provider === 'google') {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const modelName = process.env.GOOGLE_MODEL || 'gemini-1.5-flash';
+    const genAI = new GoogleGenerativeAI(effectiveGoogleKey);
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
+
+CRITICAL SAFETY RULES:
+1. ALWAYS emphasize that this is for educational purposes only and not medical advice.
+2. ALWAYS recommend consulting a healthcare professional for diagnosis/treatment.
+3. Identify emergency symptoms and urge immediate medical attention when appropriate.
+4. Do NOT provide prescriptions or specific treatments; focus on general guidance.
+5. Be cautious and conservative; prioritize patient safety.
+
+Task: Analyze the provided symptoms and return structured JSON with:
+{
+  "probable_conditions": [
+    {
+      "name": "Condition Name",
+      "probability": "High|Medium|Low",
+      "description": "Brief description",
+      "common_symptoms": ["symptom1", "symptom2"]
+    }
+  ],
+  "recommendations": [
+    {
+      "category": "Immediate Action|Self-Care|Follow-up|Emergency",
+      "action": "Specific recommendation",
+      "priority": "High|Medium|Low"
+    }
+  ],
+  "emergency_warning": "Warning if emergency symptoms detected, otherwise null"
+}
+
+Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-focused, and educational.`;
+
+    const userPrompt = [
+      `Symptoms: ${symptoms}`,
+      age ? `Age: ${age}` : null,
+      gender ? `Gender: ${gender}` : null,
+      '',
+      'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
+    ].filter(Boolean).join('\n');
+
+    const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
+
+    try {
+      const result = await model.generateContent(prompt);
+      const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
+      try {
+        return JSON.parse(text);
+      } catch (_) {
+        const match = (text || '').match(/\{[\s\S]*\}/);
+        if (match) {
+          try { return JSON.parse(match[0]); } catch {}
+        }
+        const lower = (symptoms || '').toLowerCase();
+        const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
+        return {
+          probable_conditions: [
+            likelyCold
+              ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
+              : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
+          ],
+          recommendations: [ { category: 'Follow-up', action: 'Please try again later.', priority: 'Low' } ],
+          emergency_warning: null
+        };
+      }
+    } catch (err) {
+      const lower = (symptoms || '').toLowerCase();
+      const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
+      return {
+        probable_conditions: [
+          likelyCold
+            ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
+            : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
+        ],
+        recommendations: [ { category: 'Follow-up', action: 'Please try again later or reduce request load.', priority: 'Medium' } ],
+        emergency_warning: null
+      };
+    }
+  }
+
   // OpenAI path only
   if (provider !== 'openai') {
-    throw new Error('Node backend currently supports LLM_PROVIDER=openai');
+    throw new Error('Node backend currently supports LLM_PROVIDER=openai or google');
   }
   const { OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: effectiveKey, organization: process.env.OPENAI_ORG || undefined });
+  const client = new OpenAI({ apiKey: effectiveOpenAIKey, organization: process.env.OPENAI_ORG || undefined });
   const MAX_TOKENS = Math.max(200, Math.min(2000, parseInt(process.env.OPENAI_MAX_TOKENS || '900', 10)));
   const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -242,14 +335,17 @@ app.post('/api/check-symptoms', async (req, res) => {
     if (!symptoms || typeof symptoms !== 'string' || symptoms.trim().length < 3) {
       return res.status(422).json({ detail: 'Invalid "symptoms"; must be a string of length >= 3' });
     }
+
     let openaiKeyOverride = undefined;
+    let googleKeyOverride = undefined;
     if (ALLOW_CLIENT_API_KEY) {
-      const hdr = req.headers['x-openai-key'];
-      if (typeof hdr === 'string' && hdr.trim().startsWith('sk-') && hdr.trim().length > 20) {
-        openaiKeyOverride = hdr.trim();
-      }
+      const oai = req.headers['x-openai-key'];
+      const gk = req.headers['x-google-key'];
+      if (typeof oai === 'string' && oai.trim().startsWith('sk-') && oai.trim().length > 20) openaiKeyOverride = oai.trim();
+      if (typeof gk === 'string' && gk.trim().length > 20) googleKeyOverride = gk.trim();
     }
-    const llm = await analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride });
+
+    const llm = await analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride, googleKeyOverride });
     const conditions = llm.probable_conditions || [];
     const recommendations = llm.recommendations || [];
     const emergency_warning = llm.emergency_warning || null;
