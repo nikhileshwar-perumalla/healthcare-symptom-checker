@@ -1,13 +1,12 @@
-import serverless from 'serverless-http';
 import { init } from '../node-backend/src/app.js';
 
-let handlerPromise;
+let appPromise;
 
 export default async function handler(req, res) {
-  if (!handlerPromise) {
-    const app = await init();
-    handlerPromise = serverless(app);
+  if (!appPromise) {
+    appPromise = init();
   }
-  const h = await handlerPromise;
-  return h(req, res);
+  const app = await appPromise;
+  // Express apps are request handlers: (req, res) => void
+  return app(req, res);
 }
