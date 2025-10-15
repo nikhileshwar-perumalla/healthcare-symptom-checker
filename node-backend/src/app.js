@@ -2,8 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-// Node 18+ has global fetch; if not available, uncomment the next line
-// import fetch from 'node-fetch';
 
 dotenv.config();
 
@@ -12,10 +10,7 @@ const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENAB
 let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
 const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
-const LLM_CONFIGURED = (
-  (LLM_PROVIDER === 'openai' && !!process.env.OPENAI_API_KEY && !NO_LLM) ||
-  (LLM_PROVIDER === 'huggingface' && !!process.env.HUGGINGFACE_API_KEY && !NO_LLM)
-);
+const LLM_CONFIGURED = !!process.env.OPENAI_API_KEY && !NO_LLM && LLM_PROVIDER === 'openai';
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
 const app = express();
@@ -65,7 +60,7 @@ async function analyzeSymptoms({ symptoms, age, gender }) {
   const provider = LLM_PROVIDER;
 
   // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
-  if (NO_LLM || (provider === 'openai' && !process.env.OPENAI_API_KEY) || (provider === 'huggingface' && !process.env.HUGGINGFACE_API_KEY)) {
+  if (NO_LLM || !process.env.OPENAI_API_KEY) {
     const lower = (symptoms || '').toLowerCase();
     const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
     const conditions = likelyCold
@@ -98,130 +93,9 @@ async function analyzeSymptoms({ symptoms, age, gender }) {
     };
   }
 
-  if (provider === 'huggingface') {
-    const HF_MODEL = process.env.HUGGINGFACE_MODEL || 'HuggingFaceH4/zephyr-7b-beta';
-    const HF_KEY = process.env.HUGGINGFACE_API_KEY;
-
-    const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
-
-CRITICAL SAFETY RULES:
-1. ALWAYS emphasize that this is for educational purposes only and not medical advice.
-2. ALWAYS recommend consulting a healthcare professional for diagnosis/treatment.
-3. Identify emergency symptoms and urge immediate medical attention when appropriate.
-4. Do NOT provide prescriptions or specific treatments; focus on general guidance.
-5. Be cautious and conservative; prioritize patient safety.
-
-Task: Analyze the provided symptoms and return structured JSON with:
-{
-  "probable_conditions": [
-    {
-      "name": "Condition Name",
-      "probability": "High|Medium|Low",
-      "description": "Brief description",
-      "common_symptoms": ["symptom1", "symptom2"]
-    }
-  ],
-  "recommendations": [
-    {
-      "category": "Immediate Action|Self-Care|Follow-up|Emergency",
-      "action": "Specific recommendation",
-      "priority": "High|Medium|Low"
-    }
-  ],
-  "emergency_warning": "Warning if emergency symptoms detected, otherwise null"
-}
-
-Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-focused, and educational.`;
-
-    const userPrompt = [
-      `Symptoms: ${symptoms}`,
-      age ? `Age: ${age}` : null,
-      gender ? `Gender: ${gender}` : null,
-      '',
-      'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
-    ].filter(Boolean).join('\n');
-
-    const inputs = `${SYSTEM_PROMPT}\n\nUser:\n${userPrompt}\n\nAssistant: Return ONLY the JSON object.`;
-
-    try {
-      const resp = await fetch(`https://api-inference.huggingface.co/models/${encodeURIComponent(HF_MODEL)}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${HF_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            inputs,
-            parameters: {
-              max_new_tokens: 512,
-              temperature: 0.3,
-              return_full_text: false
-            }
-          })
-        }
-      );
-
-      if (resp.status === 503) {
-        // Model loading on free tier; provide friendly fallback
-        return {
-          probable_conditions: [
-            {
-              name: 'Model loading — please retry',
-              probability: 'Unknown',
-              description: 'The free model is warming up. Please try again in a few seconds.',
-              common_symptoms: []
-            }
-          ],
-          recommendations: [
-            { category: 'Follow-up', action: 'Retry shortly; if symptoms are severe, seek medical care.', priority: 'Medium' }
-          ],
-          emergency_warning: null
-        };
-      }
-
-      if (!resp.ok) throw new Error(`HF API error: ${resp.status}`);
-      const data = await resp.json();
-      // Expect array with generated_text for text-generation
-      const text = Array.isArray(data) ? (data[0]?.generated_text || '') : (data?.generated_text || data?.[0]?.generated_text || '');
-      try {
-        return JSON.parse(text);
-      } catch (_) {
-        // If the model included preamble, try to extract JSON
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-          try { return JSON.parse(match[0]); } catch {}
-        }
-        // Fallback stub
-        return {
-          probable_conditions: [
-            { name: 'Non-specific symptoms (heuristic)', probability: 'Low', description: 'Unable to parse model output.', common_symptoms: [] }
-          ],
-          recommendations: [
-            { category: 'Follow-up', action: 'Please try again or consult a healthcare professional.', priority: 'Medium' }
-          ],
-          emergency_warning: null
-        };
-      }
-    } catch (err) {
-      // Network or other error; return safe stub
-      const lower = (symptoms || '').toLowerCase();
-      const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-      return {
-        probable_conditions: [
-          likelyCold
-            ? { name: 'Common Cold (heuristic) — HF unavailable', probability: 'Medium', description: 'Heuristic used due to temporary HF unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
-            : { name: 'Non-specific symptoms (heuristic) — HF unavailable', probability: 'Low', description: 'Heuristic used due to temporary HF unavailability.', common_symptoms: [] }
-        ],
-        recommendations: [ { category: 'Follow-up', action: 'Please try again later.', priority: 'Low' } ],
-        emergency_warning: null
-      };
-    }
-  }
-
-  // Default: OpenAI path
+  // OpenAI path only
   if (provider !== 'openai') {
-    throw new Error('Unsupported LLM_PROVIDER. Use "openai" or "huggingface".');
+    throw new Error('Node backend currently supports LLM_PROVIDER=openai');
   }
   const { OpenAI } = await import('openai');
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
