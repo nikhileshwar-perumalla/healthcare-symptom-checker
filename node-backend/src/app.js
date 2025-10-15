@@ -7,6 +7,7 @@ dotenv.config();
 
 // Default DB to disabled in serverless unless explicitly enabled
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
+let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
@@ -37,7 +38,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', message: 'API is operational' });
+  res.json({ status: 'healthy', message: 'API is operational', db_enabled: ENABLE_DB, db_ready: DB_READY });
 });
 
 app.get('/api/disclaimer', (req, res) => {
@@ -185,7 +186,7 @@ app.post('/api/check-symptoms', async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    if (ENABLE_DB && QueryModel) {
+    if (ENABLE_DB && QueryModel && DB_READY) {
       const doc = await QueryModel.create({
         symptoms,
         response,
@@ -205,7 +206,7 @@ app.post('/api/check-symptoms', async (req, res) => {
 
 app.get('/api/history', async (req, res) => {
   try {
-    if (!ENABLE_DB || !QueryModel) return res.json([]);
+    if (!ENABLE_DB || !QueryModel || !DB_READY) return res.json([]);
     const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
     const sessionId = req.query.session_id;
     const filter = sessionId ? { session_id: sessionId } : {};
@@ -229,7 +230,7 @@ app.get('/api/history', async (req, res) => {
 
 app.get('/api/query/:id', async (req, res) => {
   try {
-    if (!ENABLE_DB || !QueryModel) return res.status(404).json({ detail: 'Query not found (DB disabled)' });
+    if (!ENABLE_DB || !QueryModel || !DB_READY) return res.status(404).json({ detail: 'Query not found (DB disabled)' });
     const doc = await QueryModel.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ detail: 'Query not found' });
     const r = doc.response || {};
@@ -248,7 +249,13 @@ app.get('/api/query/:id', async (req, res) => {
 
 export async function init() {
   if (ENABLE_DB) {
-    await mongoose.connect(MONGO_URL);
+    try {
+      await mongoose.connect(MONGO_URL, { serverSelectionTimeoutMS: 5000 });
+      DB_READY = true;
+    } catch (err) {
+      console.error('Mongo connection failed:', err?.message || err);
+      DB_READY = false;
+    }
   }
   return app;
 }
