@@ -11,6 +11,7 @@ let DB_READY = false;
 const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
 const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
 const LLM_CONFIGURED = !!process.env.OPENAI_API_KEY && !NO_LLM && LLM_PROVIDER === 'openai';
+const ALLOW_CLIENT_API_KEY = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.ALLOW_CLIENT_API_KEY || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
 const app = express();
@@ -47,7 +48,8 @@ app.get('/health', (req, res) => {
     db_ready: DB_READY,
     llm_provider: LLM_PROVIDER,
     llm_configured: LLM_CONFIGURED,
-    llm_mode: NO_LLM ? 'stub' : (LLM_CONFIGURED ? 'live' : 'stub')
+    llm_mode: NO_LLM ? 'stub' : (LLM_CONFIGURED ? 'live' : 'stub'),
+    allow_client_api_key: ALLOW_CLIENT_API_KEY
   });
 });
 
@@ -56,11 +58,12 @@ app.get('/api/disclaimer', (req, res) => {
 });
 
 // LLM integration via OpenAI SDK
-async function analyzeSymptoms({ symptoms, age, gender }) {
+async function analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride }) {
   const provider = LLM_PROVIDER;
 
   // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
-  if (NO_LLM || !process.env.OPENAI_API_KEY) {
+  const effectiveKey = openaiKeyOverride || process.env.OPENAI_API_KEY;
+  if (NO_LLM || !effectiveKey) {
     const lower = (symptoms || '').toLowerCase();
     const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
     const conditions = likelyCold
@@ -98,7 +101,7 @@ async function analyzeSymptoms({ symptoms, age, gender }) {
     throw new Error('Node backend currently supports LLM_PROVIDER=openai');
   }
   const { OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, organization: process.env.OPENAI_ORG || undefined });
+  const client = new OpenAI({ apiKey: effectiveKey, organization: process.env.OPENAI_ORG || undefined });
   const MAX_TOKENS = Math.max(200, Math.min(2000, parseInt(process.env.OPENAI_MAX_TOKENS || '900', 10)));
   const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -239,7 +242,14 @@ app.post('/api/check-symptoms', async (req, res) => {
     if (!symptoms || typeof symptoms !== 'string' || symptoms.trim().length < 3) {
       return res.status(422).json({ detail: 'Invalid "symptoms"; must be a string of length >= 3' });
     }
-    const llm = await analyzeSymptoms({ symptoms, age, gender });
+    let openaiKeyOverride = undefined;
+    if (ALLOW_CLIENT_API_KEY) {
+      const hdr = req.headers['x-openai-key'];
+      if (typeof hdr === 'string' && hdr.trim().startsWith('sk-') && hdr.trim().length > 20) {
+        openaiKeyOverride = hdr.trim();
+      }
+    }
+    const llm = await analyzeSymptoms({ symptoms, age, gender, openaiKeyOverride });
     const conditions = llm.probable_conditions || [];
     const recommendations = llm.recommendations || [];
     const emergency_warning = llm.emergency_warning || null;
