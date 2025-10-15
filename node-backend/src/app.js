@@ -98,7 +98,10 @@ async function analyzeSymptoms({ symptoms, age, gender }) {
     throw new Error('Node backend currently supports LLM_PROVIDER=openai');
   }
   const { OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, organization: process.env.OPENAI_ORG || undefined });
+  const MAX_TOKENS = Math.max(200, Math.min(2000, parseInt(process.env.OPENAI_MAX_TOKENS || '900', 10)));
+  const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
 
@@ -143,15 +146,30 @@ Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-foc
 
   let response;
   try {
-    response = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 2000,
-    });
+    let attempt = 0;
+    while (true) {
+      try {
+        response = await client.chat.completions.create({
+          model: MODEL,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.3,
+          max_tokens: MAX_TOKENS,
+        });
+        break;
+      } catch (e) {
+        const status = e?.status || e?.code;
+        if (status === 429 && attempt < 2) {
+          // Retry with backoff: 400ms, 1000ms
+          await sleep(attempt === 0 ? 400 : 1000);
+          attempt++;
+          continue;
+        }
+        throw e;
+      }
+    }
   } catch (err) {
     const code = err?.status || err?.code || err?.error?.type || 'unknown_error';
     const isQuota = code === 429 || String(code).includes('quota') || String(code).includes('rate');
