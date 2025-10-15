@@ -15,6 +15,10 @@ function SymptomForm({ onSubmit, loading }) {
   return (
     <form onSubmit={handleSubmit}>
       <h2>Describe Your Symptoms</h2>
+      <p style={{ color: '#6b7280', margin: '6px 0 14px' }}>
+        Be as specific as possible (duration, severity, associated symptoms). Example: "Fever 101°F,
+        sore throat, dry cough for 3 days; mild chest tightness at night".
+      </p>
       
       <div className="form-group">
         <label htmlFor="symptoms">Symptoms *</label>
@@ -22,7 +26,7 @@ function SymptomForm({ onSubmit, loading }) {
           id="symptoms"
           value={symptoms}
           onChange={(e) => setSymptoms(e.target.value)}
-          placeholder="Describe your symptoms in detail. For example: 'I have a headache, fever, and sore throat for the past 2 days...'"
+          placeholder="Describe your symptoms (e.g., 'Fever 101°F, sore throat, dry cough for 3 days')"
           required
           disabled={loading}
         />

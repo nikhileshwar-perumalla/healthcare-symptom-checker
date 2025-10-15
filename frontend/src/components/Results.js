@@ -19,7 +19,7 @@ function Results({ results }) {
 
   return (
     <div>
-      <h2>Analysis Results</h2>
+      <h2 style={{ marginBottom: 12 }}>Analysis Results</h2>
 
       {results.emergency_warning && (
         <div className="emergency-warning">
