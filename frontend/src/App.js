@@ -1,30 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './App.css';
-import { checkSymptoms, getHistory } from './api';
+import { checkSymptoms } from './api';
 import SymptomForm from './components/SymptomForm';
 import Results from './components/Results';
-import History from './components/History';
 import DisclaimerBanner from './components/DisclaimerBanner';
 
 function App() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [sessionId] = useState(() => `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-
-  useEffect(() => {
-    loadHistory();
-  }, []);
-
-  const loadHistory = async () => {
-    try {
-      const historyData = await getHistory(10, sessionId);
-      setHistory(historyData);
-    } catch (err) {
-      console.error('Error loading history:', err);
-    }
-  };
+  // No session id needed for demo
 
   const handleSubmit = async (symptoms, age, gender) => {
     setLoading(true);
@@ -32,11 +17,10 @@ function App() {
     setResults(null);
 
     try {
-      const response = await checkSymptoms(symptoms, age, gender, sessionId);
+  const response = await checkSymptoms(symptoms, age, gender);
       setResults(response);
       
-      // Reload history after successful submission
-      await loadHistory();
+  // No history reload (history feature removed)
     } catch (err) {
       setError(err.response?.data?.detail || 'An error occurred while analyzing symptoms. Please try again.');
     } finally {
@@ -84,9 +68,7 @@ function App() {
           )}
         </div>
 
-        <div className="card history-section">
-          <History history={history} />
-        </div>
+        {/* History section removed */}
       </div>
     </div>
   );

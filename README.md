@@ -18,7 +18,7 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 - **Probable Conditions**: Get a list of possible medical conditions with probability ratings
 - **Smart Recommendations**: Receive actionable next steps categorized by priority
 - **Emergency Detection**: Automatic identification of emergency symptoms with urgent warnings
-- **Query History**: Track previous symptom queries with MongoDB (optional)
+- (No database): This version does not store query history
 - **Safety-First Design**: Comprehensive disclaimers and safety warnings throughout
 - **Modern UI**: Clean, responsive React interface with intuitive design
 
@@ -26,12 +26,10 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 
 ### Backend (Node.js + Express)
 - **Framework**: Express
-- **Database**: MongoDB (optional) via Mongoose
+- **Database**: None (no persistence)
 - **LLM Integration**: Google AI Studio (Gemini only)
 - **API Endpoints**:
   - `POST /api/check-symptoms` - Analyze symptoms
-  - `GET /api/history` - Get query history
-  - `GET /api/query/:id` - Get specific query
   - `GET /api/disclaimer` - Get medical disclaimer
 
 ### Frontend (React)
@@ -41,7 +39,6 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 - **Components**:
   - SymptomForm - Input interface
   - Results - Display analysis
-  - History - Query history
   - DisclaimerBanner - Safety warnings
 
 ## 🚀 Quick Start
@@ -66,10 +63,8 @@ cp .env.example .env
 3. Edit `.env` and set:
 ```env
 GOOGLE_API_KEY=your_google_api_key_here
-GOOGLE_MODEL=gemini-1.5-flash
+GOOGLE_MODEL=gemini-2.5-flash
 LLM_PROVIDER=google
-ENABLE_DB=0
-MONGO_URL=mongodb://localhost:27017/symptom_checker  # if ENABLE_DB=1
 ```
 
 4. Install and run:
@@ -112,21 +107,15 @@ Steps:
 3. Set environment variables:
   - `LLM_PROVIDER` = `google`
   - `GOOGLE_API_KEY` = your key
-  - `GOOGLE_MODEL` = `gemini-1.5-flash` (or your chosen Gemini model)
-  - `ENABLE_DB` = `0` (or `1` with Mongo)
-  - `MONGO_URL` = your Mongo connection string (if `ENABLE_DB=1`)
+  - `GOOGLE_MODEL` = `gemini-2.5-flash` (or your chosen Gemini model)
 
 After deploy, Vercel will give you a URL like `https://<project>.vercel.app`.
 Use `https://<project>.vercel.app/health` and `https://<project>.vercel.app/api/check-symptoms` to test.
 
-### Optional: Node.js + Express + Mongo backend
-
-This repo includes a Node backend you can deploy to Vercel.
+### Node backend (no DB)
 
 Endpoints:
 - POST `/api/check-symptoms`
-- GET `/api/history`
-- GET `/api/query/:id`
 - GET `/api/disclaimer`
 
 Vercel route for Node backend:
@@ -138,15 +127,6 @@ cd node-backend
 npm install
 npm run dev
 ```
-
-Env vars for Node backend:
-- LLM_PROVIDER=google (Gemini-only)
-- GOOGLE_API_KEY=...
-- GOOGLE_MODEL=gemini-1.5-flash
-- ENABLE_DB=0 (or 1 if using Mongo)
-- MONGO_URL=mongodb+srv://<user>:<pass>@<cluster>/<db>?retryWrites=true&w=majority
-
-On Vercel (already configured in `vercel.json`), requests to `/api/node` go to the Node backend entry.
 
 ## 📖 API Documentation
 
@@ -189,21 +169,7 @@ On Vercel (already configured in `vercel.json`), requests to `/api/node` go to t
 }
 ```
 
-### Get History
-
-**Endpoint**: `GET /api/history?limit=10&session_id=optional`
-
-**Response**:
-```json
-[
-  {
-    "id": 1,
-    "symptoms": "headache, fever, sore throat",
-    "created_at": "2025-10-15T12:00:00",
-    "conditions_summary": "Common Cold, Flu"
-  }
-]
-```
+<!-- History endpoint removed in no-DB version -->
 
 ## 🔧 Configuration
 
@@ -214,11 +180,7 @@ On Vercel (already configured in `vercel.json`), requests to `/api/node` go to t
 # LLM Provider Configuration (Google only)
 GOOGLE_API_KEY=your_key_here
 LLM_PROVIDER=google
-GOOGLE_MODEL=gemini-1.5-flash
-
-# Database (optional)
-ENABLE_DB=0
-MONGO_URL=mongodb://localhost:27017/symptom_checker
+GOOGLE_MODEL=gemini-2.5-flash
 
 # Server (local dev)
 PORT=8000
@@ -227,6 +189,7 @@ PORT=8000
 **Frontend (.env)** (optional):
 ```env
 REACT_APP_API_URL=http://localhost:8000
+REACT_APP_GOOGLE_API_KEY= # Optional: provide Gemini key from client for local dev only
 ```
 
 ## 🧪 Testing
@@ -279,11 +242,12 @@ The system uses a carefully crafted system prompt that:
 - **Probability Indicators**: Color-coded probability badges (High/Medium/Low)
 - **Priority System**: Recommendations sorted by priority
 - **Emergency Alerts**: Prominent warnings for urgent conditions
-- **Session History**: Track queries within the current session
+<!-- No persistent history in this version -->
 
 ## 🔐 Security Considerations
 
 - API keys stored in environment variables (never in code)
+- For local development only, you can set `REACT_APP_GOOGLE_API_KEY` and `ALLOW_CLIENT_API_KEY=1` to forward the key in an HTTP header. Do not enable this in production.
 - Input validation on both frontend and backend
 - Rate limiting (can be added for production)
 - CORS properly configured
@@ -310,7 +274,7 @@ healthcare-symptom-checker/
 │   │   │   ├── DisclaimerBanner.js
 │   │   │   ├── SymptomForm.js
 │   │   │   ├── Results.js
-│   │   │   └── History.js
+│   │   │   
 │   │   ├── App.js
 │   │   ├── App.css
 │   │   ├── api.js
@@ -338,13 +302,12 @@ healthcare-symptom-checker/
    - Add age and gender information
    - Enter more complex symptoms
    - Show emergency warning detection
-   - Display query history
+ 
 
 4. **Technical Overview** (1 minute)
   - Hit `/health` to show configuration
-   - Quick code walkthrough
-   - Database query history
-   - LLM integration explanation
+  - Quick code walkthrough
+  - LLM integration explanation
 
 5. **Conclusion** (30 seconds)
    - Reiterate safety disclaimers
@@ -386,7 +349,7 @@ This project is optimized for Vercel (Node serverless) as described above. You c
 1. **New LLM Provider**: Edit `node-backend/src/app.js` (see `analyzeSymptoms`) and add provider logic
 2. **New Endpoints**: Add Express routes in `node-backend/src/app.js`
 3. **UI Components**: Create in `frontend/src/components/`
-4. **Database Models**: Extend the Mongoose schema in `node-backend/src/app.js` or introduce a models file
+4. **Database Models**: Not applicable (no database in this version)
 
 ### Code Quality
 
@@ -422,7 +385,7 @@ For issues or questions:
 - ✅ Returns probable conditions
 - ✅ Provides recommendations
 - ✅ Includes safety disclaimers
-- ✅ Stores query history in database
+- 
 - ✅ Frontend form interface
 - ✅ Emergency symptom detection
 - ✅ Well-structured code

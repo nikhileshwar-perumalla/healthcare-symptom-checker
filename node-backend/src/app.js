@@ -1,38 +1,19 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
 
 dotenv.config();
 
-// Default DB to disabled in serverless unless explicitly enabled
-const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
-let DB_READY = false;
 // Google-only provider
 const LLM_PROVIDER = 'google';
 const LLM_CONFIGURED = !!process.env.GOOGLE_API_KEY;
 const ALLOW_CLIENT_API_KEY = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.ALLOW_CLIENT_API_KEY || '0');
-const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Mongo model (optional)
-let QueryModel = null;
-if (ENABLE_DB) {
-  const schema = new mongoose.Schema(
-    {
-      symptoms: { type: String, required: true },
-      response: { type: Object, required: true },
-      conditions: { type: Array },
-      recommendations: { type: Array },
-      session_id: { type: String },
-    },
-    { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
-  );
-  QueryModel = mongoose.model('SymptomQuery', schema);
-}
+// No database usage
 
 const MEDICAL_DISCLAIMER = `\u26a0\ufe0f IMPORTANT MEDICAL DISCLAIMER \u26a0\ufe0f\n\nThis symptom checker is for EDUCATIONAL PURPOSES ONLY and should NOT be used as a substitute for professional medical advice, diagnosis, or treatment.`;
 
@@ -44,8 +25,6 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     message: 'API is operational',
-    db_enabled: ENABLE_DB,
-    db_ready: DB_READY,
     llm_provider: LLM_PROVIDER,
     llm_configured: LLM_CONFIGURED,
     allow_client_api_key: ALLOW_CLIENT_API_KEY
@@ -66,9 +45,33 @@ async function analyzeSymptoms({ symptoms, age, gender, googleKeyOverride }) {
   }
 
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
-  const modelName = process.env.GOOGLE_MODEL || 'gemini-1.5-flash';
+  const envModel = (process.env.GOOGLE_MODEL || 'gemini-2.5-flash').trim();
+  const fallbackModels = [
+    // Prefer stable/latest non-pro Flash models from the user's available list
+    envModel,
+    'gemini-2.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-001',
+    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash-lite-001',
+    // Previews as later fallbacks
+    'gemini-2.5-flash-preview-09-2025',
+    'gemini-2.5-flash-preview-05-20',
+    'gemini-2.5-flash-lite-preview-09-2025',
+    'gemini-2.5-flash-lite-preview-06-17'
+  ].filter((v, i, a) => v && a.indexOf(v) === i && !/\bpro\b/i.test(v));
+
   const genAI = new GoogleGenerativeAI(effectiveGoogleKey);
-  const model = genAI.getGenerativeModel({ model: modelName });
+
+  async function tryGenerateWithModel(modelName, promptText) {
+    const model = genAI.getGenerativeModel({ model: modelName });
+    const result = await model.generateContent(promptText);
+    const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
+    return text;
+  }
 
   const SYSTEM_PROMPT = `You are a medical information assistant designed to provide educational information about health symptoms.
 
@@ -113,17 +116,97 @@ Important output rules:
 
   const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
 
-  const result = await model.generateContent(prompt);
-  const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
+  let text = '';
+  let lastErr = null;
+  for (const m of fallbackModels) {
+    try {
+      text = await tryGenerateWithModel(m, prompt);
+      if (text && String(text).trim().length > 0) break; // success
+    } catch (e) {
+      const msg = String(e?.message || e || '');
+      // If model not found or not supported for generateContent, try next candidate
+      if (/404|not found|not\s+supported|ListModels/i.test(msg)) {
+        lastErr = e;
+        continue;
+      }
+      // Other errors: bubble up
+      throw e;
+    }
+  }
+  if (!text || String(text).trim().length === 0) {
+    const err = new Error('Gemini returned empty response');
+    err.statusCode = 502;
+    throw (lastErr || err);
+  }
 
-  // Try strict parse first, then guarded substring extraction; otherwise, raise
+  // Normalization helpers to keep responses balanced and non-alarmist
+  function normalizeLLMOutput(raw, inputText) {
+    const out = typeof raw === 'object' && raw ? JSON.parse(JSON.stringify(raw)) : {};
+    out.probable_conditions = Array.isArray(out.probable_conditions) ? out.probable_conditions : [];
+    out.recommendations = Array.isArray(out.recommendations) ? out.recommendations : [];
+    out.emergency_warning = out.emergency_warning ?? null;
+
+    const lower = (inputText || '').toLowerCase();
+    const redFlags = [
+      'severe chest pain', 'shortness of breath', 'difficulty breathing', 'confusion', 'stiff neck',
+      'rash that doesn\'t blanch', 'non-blanching rash', 'persistent vomiting', 'seizure', 'unresponsive',
+      'weakness on one side', 'slurred speech', 'severe abdominal pain', 'blood in stool', 'bloody stool',
+      'fainting', 'loss of consciousness', 'pregnant and bleeding', 'infant', 'under 3 months'
+    ];
+    const hasRedFlag = redFlags.some((flag) => lower.includes(flag));
+
+    const mildTerms = ['fever', 'headache', 'sore throat', 'runny nose', 'cough', 'body aches', 'fatigue', 'congestion'];
+    const mildCount = mildTerms.reduce((acc, term) => acc + (lower.includes(term) ? 1 : 0), 0);
+
+    // Gate emergency warnings: only keep if a clear red flag is present
+    if (!hasRedFlag) {
+      out.emergency_warning = null;
+      // Also remove any Emergency category recommendations if no red flags
+      out.recommendations = out.recommendations.map((r) => {
+        if (!r || typeof r !== 'object') return r;
+        if ((r.category || '').toLowerCase() === 'emergency') {
+          return { ...r, category: 'Immediate Action', priority: r.priority && r.priority.toLowerCase() === 'high' ? 'High' : 'Medium' };
+        }
+        return r;
+      });
+    }
+
+    // Probability balancing: avoid High unless clear red flags or stronger signals
+    let highSeen = 0;
+    out.probable_conditions = out.probable_conditions.map((c) => {
+      if (!c || typeof c !== 'object') return c;
+      const prob = (c.probability || '').toString().toLowerCase();
+      let newProb = c.probability || 'Medium';
+
+      if (prob === 'high') {
+        if (!hasRedFlag && mildCount <= 2) {
+          newProb = 'Medium';
+        } else {
+          highSeen += 1;
+          // Only allow a single High when no red flags; demote extras
+          if (!hasRedFlag && highSeen > 1) newProb = 'Medium';
+        }
+      }
+      if (prob === 'low' && mildCount >= 3 && !hasRedFlag) {
+        // Slightly upweight overly pessimistic lows for common mild presentations
+        newProb = 'Medium';
+      }
+      return { ...c, probability: newProb };
+    });
+
+    return out;
+  }
+
+  // Try strict parse first, then guarded substring extraction, then normalize
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    return normalizeLLMOutput(parsed, symptoms);
   } catch {
     const match = (text || '').match(/\{[\s\S]*\}/);
     if (match) {
       try {
-        return JSON.parse(match[0]);
+        const parsed = JSON.parse(match[0]);
+        return normalizeLLMOutput(parsed, symptoms);
       } catch {}
     }
     const err = new Error('Gemini returned non-JSON response');
@@ -134,7 +217,7 @@ Important output rules:
 
 app.post('/api/check-symptoms', async (req, res) => {
   try {
-    const { symptoms, age, gender, session_id } = req.body || {};
+    const { symptoms, age, gender } = req.body || {};
     if (!symptoms || typeof symptoms !== 'string' || symptoms.trim().length < 3) {
       return res.status(422).json({ detail: 'Invalid "symptoms"; must be a string of length >= 3' });
     }
@@ -145,7 +228,7 @@ app.post('/api/check-symptoms', async (req, res) => {
       if (typeof gk === 'string' && gk.trim().length > 20) googleKeyOverride = gk.trim();
     }
 
-  const llm = await analyzeSymptoms({ symptoms, age, gender, googleKeyOverride });
+    const llm = await analyzeSymptoms({ symptoms, age, gender, googleKeyOverride });
     const conditions = llm.probable_conditions || [];
     const recommendations = llm.recommendations || [];
     const emergency_warning = llm.emergency_warning || null;
@@ -158,17 +241,6 @@ app.post('/api/check-symptoms', async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    if (ENABLE_DB && QueryModel && DB_READY) {
-      const doc = await QueryModel.create({
-        symptoms,
-        response,
-        conditions,
-        recommendations,
-        session_id: session_id || null,
-      });
-      response.query_id = doc._id.toString();
-    }
-
     return res.json(response);
   } catch (err) {
     const status = err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
@@ -176,60 +248,8 @@ app.post('/api/check-symptoms', async (req, res) => {
     return res.status(status).json({ detail: msg });
   }
 });
-
-app.get('/api/history', async (req, res) => {
-  try {
-    if (!ENABLE_DB || !QueryModel || !DB_READY) return res.json([]);
-    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
-    const sessionId = req.query.session_id;
-    const filter = sessionId ? { session_id: sessionId } : {};
-    const items = await QueryModel.find(filter).sort({ created_at: -1 }).limit(limit).lean();
-    const history = items.map((q) => {
-      const conditions = q.conditions || [];
-      let summary = conditions.slice(0, 3).map((c) => c.name || 'Unknown').join(', ');
-      if (conditions.length > 3) summary += ` and ${conditions.length - 3} more`;
-      return {
-        id: q._id.toString(),
-        symptoms: q.symptoms.length > 100 ? q.symptoms.slice(0, 100) + '...' : q.symptoms,
-        created_at: q.created_at,
-        conditions_summary: summary || 'No conditions identified',
-      };
-    });
-    return res.json(history);
-  } catch (err) {
-    return res.status(500).json({ detail: err?.message || 'Error retrieving history' });
-  }
-});
-
-app.get('/api/query/:id', async (req, res) => {
-  try {
-    if (!ENABLE_DB || !QueryModel || !DB_READY) return res.status(404).json({ detail: 'Query not found (DB disabled)' });
-    const doc = await QueryModel.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ detail: 'Query not found' });
-    const r = doc.response || {};
-    return res.json({
-      probable_conditions: r.probable_conditions || [],
-      recommendations: r.recommendations || [],
-      disclaimer: MEDICAL_DISCLAIMER,
-      emergency_warning: r.emergency_warning || null,
-      query_id: doc._id.toString(),
-      timestamp: doc.created_at,
-    });
-  } catch (err) {
-    return res.status(500).json({ detail: err?.message || 'Error retrieving query' });
-  }
-});
-
 export async function init() {
-  if (ENABLE_DB) {
-    try {
-      await mongoose.connect(MONGO_URL, { serverSelectionTimeoutMS: 5000 });
-      DB_READY = true;
-    } catch (err) {
-      console.error('Mongo connection failed:', err?.message || err);
-      DB_READY = false;
-    }
-  }
+  // No DB init required
   return app;
 }
 

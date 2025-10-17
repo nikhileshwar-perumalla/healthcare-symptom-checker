@@ -9,26 +9,19 @@ const api = axios.create({
   },
 });
 
-export const checkSymptoms = async (symptoms, age, gender, sessionId) => {
+// Optional: forward a Gemini key from the client for local/dev only.
+// Requires backend to set ALLOW_CLIENT_API_KEY=1 to accept this header.
+const CLIENT_GOOGLE_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
+if (CLIENT_GOOGLE_KEY) {
+  api.defaults.headers.common['x-google-key'] = CLIENT_GOOGLE_KEY;
+}
+
+export const checkSymptoms = async (symptoms, age, gender) => {
   const response = await api.post('/api/check-symptoms', {
     symptoms,
     age: age || null,
     gender: gender || null,
-    session_id: sessionId || null,
   });
-  return response.data;
-};
-
-export const getHistory = async (limit = 10, sessionId = null) => {
-  const params = { limit };
-  if (sessionId) params.session_id = sessionId;
-  
-  const response = await api.get('/api/history', { params });
-  return response.data;
-};
-
-export const getQuery = async (queryId) => {
-  const response = await api.get(`/api/query/${queryId}`);
   return response.data;
 };
 
