@@ -8,10 +8,9 @@ dotenv.config();
 // Default DB to disabled in serverless unless explicitly enabled
 const ENABLE_DB = !['0', 'false', 'False', 'no', 'No'].includes(process.env.ENABLE_DB || '0');
 let DB_READY = false;
-const NO_LLM = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.NO_LLM || '0');
 // Google-only provider
 const LLM_PROVIDER = 'google';
-const LLM_CONFIGURED = !!process.env.GOOGLE_API_KEY && !NO_LLM;
+const LLM_CONFIGURED = !!process.env.GOOGLE_API_KEY;
 const ALLOW_CLIENT_API_KEY = ['1', 'true', 'True', 'yes', 'Yes'].includes(process.env.ALLOW_CLIENT_API_KEY || '0');
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/symptom_checker';
 
@@ -49,7 +48,6 @@ app.get('/health', (req, res) => {
     db_ready: DB_READY,
     llm_provider: LLM_PROVIDER,
     llm_configured: LLM_CONFIGURED,
-    llm_mode: NO_LLM ? 'stub' : (LLM_CONFIGURED ? 'live' : 'stub'),
     allow_client_api_key: ALLOW_CLIENT_API_KEY
   });
 });
@@ -58,44 +56,15 @@ app.get('/api/disclaimer', (req, res) => {
   res.json({ disclaimer: MEDICAL_DISCLAIMER });
 });
 
-// LLM integration via Google AI Studio (Gemini)
+// LLM integration via Google AI Studio (Gemini) — Gemini ONLY, no heuristics
 async function analyzeSymptoms({ symptoms, age, gender, googleKeyOverride }) {
-  // Local fallback: if NO_LLM is enabled or no API key, return a stubbed safe response
   const effectiveGoogleKey = googleKeyOverride || process.env.GOOGLE_API_KEY;
-  if (NO_LLM || !effectiveGoogleKey) {
-    const lower = (symptoms || '').toLowerCase();
-    const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-    const conditions = likelyCold
-      ? [
-          {
-            name: 'Common Cold',
-            probability: 'Medium',
-            description: 'A mild viral upper respiratory infection that usually resolves on its own.',
-            common_symptoms: ['sore throat', 'runny nose', 'cough']
-          }
-        ]
-      : [
-          {
-            name: 'Non-specific symptoms',
-            probability: 'Low',
-            description: 'Insufficient information to suggest a specific condition.',
-            common_symptoms: []
-          }
-        ];
-    return {
-      probable_conditions: conditions,
-      recommendations: [
-        {
-          category: 'Self-Care',
-          action: 'Rest, stay hydrated, and monitor symptoms. Seek professional care if symptoms worsen.',
-          priority: 'Low'
-        }
-      ],
-      emergency_warning: null
-    };
+  if (!effectiveGoogleKey) {
+    const err = new Error('Missing GOOGLE_API_KEY for Gemini');
+    err.statusCode = 503;
+    throw err;
   }
 
-  // Google AI Studio (Gemini) path (only)
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const modelName = process.env.GOOGLE_MODEL || 'gemini-1.5-flash';
   const genAI = new GoogleGenerativeAI(effectiveGoogleKey);
@@ -110,7 +79,7 @@ CRITICAL SAFETY RULES:
 4. Do NOT provide prescriptions or specific treatments; focus on general guidance.
 5. Be cautious and conservative; prioritize patient safety.
 
-Task: Analyze the provided symptoms and return structured JSON with:
+Task: Analyze the provided symptoms and return strictly valid JSON with the following schema:
 {
   "probable_conditions": [
     {
@@ -130,52 +99,36 @@ Task: Analyze the provided symptoms and return structured JSON with:
   "emergency_warning": "Warning if emergency symptoms detected, otherwise null"
 }
 
-Output ONLY valid JSON (no extra commentary). Keep responses concise, safety-focused, and educational.`;
+Important output rules:
+- Output ONLY raw JSON (no code fences, no extra text).
+- Ensure it is parseable with JSON.parse.`;
 
   const userPrompt = [
-      `Symptoms: ${symptoms}`,
-      age ? `Age: ${age}` : null,
-      gender ? `Gender: ${gender}` : null,
-      '',
-      'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
-    ].filter(Boolean).join('\n');
+    `Symptoms: ${symptoms}`,
+    age ? `Age: ${age}` : null,
+    gender ? `Gender: ${gender}` : null,
+    '',
+    'Please analyze these symptoms and provide probable conditions with recommendations. Remember to include emergency warnings if applicable.'
+  ].filter(Boolean).join('\n');
 
   const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
 
+  const result = await model.generateContent(prompt);
+  const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
+
+  // Try strict parse first, then guarded substring extraction; otherwise, raise
   try {
-    const result = await model.generateContent(prompt);
-    const text = typeof result?.response?.text === 'function' ? result.response.text() : '';
-    try {
-      return JSON.parse(text);
-    } catch (_) {
-      const match = (text || '').match(/\{[\s\S]*\}/);
-      if (match) {
-        try { return JSON.parse(match[0]); } catch {}
-      }
-      const lower = (symptoms || '').toLowerCase();
-      const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-      return {
-        probable_conditions: [
-          likelyCold
-            ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
-            : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
-        ],
-        recommendations: [ { category: 'Follow-up', action: 'Please try again later.', priority: 'Low' } ],
-        emergency_warning: null
-      };
+    return JSON.parse(text);
+  } catch {
+    const match = (text || '').match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {}
     }
-  } catch (err) {
-    const lower = (symptoms || '').toLowerCase();
-    const likelyCold = /cough|sore throat|runny nose|congestion|sneez/.test(lower);
-    return {
-      probable_conditions: [
-        likelyCold
-          ? { name: 'Common Cold (heuristic) — LLM unavailable', probability: 'Medium', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: ['sore throat','runny nose','cough'] }
-          : { name: 'Non-specific symptoms (heuristic) — LLM unavailable', probability: 'Low', description: 'Heuristic used due to temporary LLM unavailability.', common_symptoms: [] }
-      ],
-      recommendations: [ { category: 'Follow-up', action: 'Please try again later or reduce request load.', priority: 'Medium' } ],
-      emergency_warning: null
-    };
+    const err = new Error('Gemini returned non-JSON response');
+    err.statusCode = 502;
+    throw err;
   }
 }
 
@@ -192,7 +145,7 @@ app.post('/api/check-symptoms', async (req, res) => {
       if (typeof gk === 'string' && gk.trim().length > 20) googleKeyOverride = gk.trim();
     }
 
-    const llm = await analyzeSymptoms({ symptoms, age, gender, googleKeyOverride });
+  const llm = await analyzeSymptoms({ symptoms, age, gender, googleKeyOverride });
     const conditions = llm.probable_conditions || [];
     const recommendations = llm.recommendations || [];
     const emergency_warning = llm.emergency_warning || null;
@@ -218,8 +171,9 @@ app.post('/api/check-symptoms', async (req, res) => {
 
     return res.json(response);
   } catch (err) {
+    const status = err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
     const msg = err?.message || 'Error processing symptoms';
-    return res.status(500).json({ detail: msg });
+    return res.status(status).json({ detail: msg });
   }
 });
 

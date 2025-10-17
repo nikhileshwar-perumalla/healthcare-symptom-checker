@@ -1,6 +1,6 @@
 # 🏥 Healthcare Symptom Checker
 
-An educational AI-powered symptom checker that analyzes user-reported symptoms and provides probable conditions with recommendations. This application uses LLM (Large Language Model) technology to provide intelligent, contextual medical information for educational purposes only.
+An educational AI-powered symptom checker that analyzes user-reported symptoms and provides probable conditions with recommendations. This application uses Gemini (Google AI Studio) exclusively to provide intelligent, contextual medical information for educational purposes only.
 
 ## ⚠️ IMPORTANT MEDICAL DISCLAIMER
 
@@ -27,7 +27,7 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 ### Backend (Node.js + Express)
 - **Framework**: Express
 - **Database**: MongoDB (optional) via Mongoose
-- **LLM Integration**: Google AI Studio (Gemini)
+- **LLM Integration**: Google AI Studio (Gemini only)
 - **API Endpoints**:
   - `POST /api/check-symptoms` - Analyze symptoms
   - `GET /api/history` - Get query history
@@ -101,7 +101,7 @@ The frontend will open automatically at `http://localhost:3000`
 
 ## ☁️ Deploy Backend on Vercel (Node)
 
-This repo is configured to deploy the Node/Express backend via `@vercel/node`.
+This repo is configured to deploy the Node/Express backend via `@vercel/node`. The backend uses only Gemini; no other LLM providers or local heuristics are used.
 
 Routes:
 - All routes go to `/api/node.js` (Express app)
@@ -140,7 +140,7 @@ npm run dev
 ```
 
 Env vars for Node backend:
-- LLM_PROVIDER=google (Node path supports Google Gemini)
+- LLM_PROVIDER=google (Gemini-only)
 - GOOGLE_API_KEY=...
 - GOOGLE_MODEL=gemini-1.5-flash
 - ENABLE_DB=0 (or 1 if using Mongo)
