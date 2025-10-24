@@ -22,24 +22,13 @@ An educational AI-powered symptom checker that analyzes user-reported symptoms a
 - **Safety-First Design**: Comprehensive disclaimers and safety warnings throughout
 - **Modern UI**: Clean, responsive React interface with intuitive design
 
-## 🏗️ Architecture
+## 🏗️ Architecture (brief)
 
-### Backend (Node.js + Express)
-- **Framework**: Express
-- **Database**: None (no persistence)
-- **LLM Integration**: Google AI Studio (Gemini only)
-- **API Endpoints**:
-  - `POST /api/check-symptoms` - Analyze symptoms
-  - `GET /api/disclaimer` - Get medical disclaimer
-
-### Frontend (React)
-- **Framework**: React 18
-- **Styling**: Custom CSS with responsive design
-- **API Client**: Axios for HTTP requests
-- **Components**:
-  - SymptomForm - Input interface
-  - Results - Display analysis
-  - DisclaimerBanner - Safety warnings
+- Backend: Node.js + Express (no DB). Gemini only.
+- Frontend: React 18 + Axios. Clean, responsive UI.
+- Endpoints:
+  - `POST /api/check-symptoms` – Analyze symptoms
+  - `GET /api/disclaimer` – Medical disclaimer
 
 ## 🚀 Quick Start
 
@@ -93,41 +82,13 @@ npm install
 npm start
 ```
 
-The frontend will open automatically at `http://localhost:3000`
+The frontend will open automatically at `http://localhost:3000` (or the next available port).
 
-## ☁️ Deploy Backend on Vercel (Node)
+## ☁️ Deploy (brief)
 
-This repo is configured to deploy the Node/Express backend via `@vercel/node`. The backend uses only Gemini; no other LLM providers or local heuristics are used.
-
-Routes:
-- All routes go to `/api/node.js` (Express app)
-
-Steps:
-1. Push this repo to GitHub (done)
-2. Import into Vercel and deploy
-3. Set environment variables:
-  - `LLM_PROVIDER` = `google`
-  - `GOOGLE_API_KEY` = your key
-  - `GOOGLE_MODEL` = `gemini-2.5-flash` (or your chosen Gemini model)
-
-After deploy, Vercel will give you a URL like `https://<project>.vercel.app`.
-Use `https://<project>.vercel.app/health` and `https://<project>.vercel.app/api/check-symptoms` to test.
-
-### Node backend (no DB)
-
-Endpoints:
-- POST `/api/check-symptoms`
-- GET `/api/disclaimer`
-
-Vercel route for Node backend:
-- `/api/node` (the Node serverless entry)
-
-Local run:
-```
-cd node-backend
-npm install
-npm run dev
-```
+- Vercel: The serverless entry is `api/node.js` (forwards to Express). Set env vars:
+  - `GOOGLE_API_KEY`, `LLM_PROVIDER=google`, `GOOGLE_MODEL=gemini-2.5-flash`.
+  - Test: `/health`, `/api/check-symptoms` on your Vercel URL.
 
 ## 📖 API Documentation
 
@@ -135,13 +96,12 @@ npm run dev
 
 **Endpoint**: `POST /api/check-symptoms`
 
-**Request Body**:
+**Request Body** (JSON):
 ```json
 {
   "symptoms": "I have a headache, fever, and sore throat",
   "age": 25,
-  "gender": "Female",
-  "session_id": "optional-session-id"
+  "gender": "Female"
 }
 ```
 
@@ -165,8 +125,7 @@ npm run dev
   ],
   "disclaimer": "Medical disclaimer text...",
   "emergency_warning": null,
-  "query_id": 1,
-  "timestamp": "2025-10-15T12:00:00"
+  "timestamp": "2025-10-15T12:00:00Z"
 }
 ```
 
@@ -193,20 +152,13 @@ REACT_APP_API_URL=http://localhost:8000
 REACT_APP_GOOGLE_API_KEY= # Optional: provide Gemini key from client for local dev only
 ```
 
-## 🧪 Testing
+## 🧪 Quick test
 
-### Test the Backend API
-
-1. Ensure the backend is running
-2. Use the `/health` endpoint to verify configuration
-3. Try the health check endpoint:
 ```bash
+# Health
 curl http://localhost:8000/health
-```
 
-### Test Symptom Analysis
-
-```bash
+# Check symptoms
 curl -X POST http://localhost:8000/api/check-symptoms \
   -H "Content-Type: application/json" \
   -d '{
@@ -216,34 +168,12 @@ curl -X POST http://localhost:8000/api/check-symptoms \
   }'
 ```
 
-## 📊 LLM Integration Details
+## 📊 LLM integration (brief)
+- Gemini-only via `@google/generative-ai`.
+- Balanced outputs with conservative probabilities and emergency gating.
 
-### Prompt Engineering
-
-The system uses a carefully crafted system prompt that:
-- Emphasizes educational purpose and safety
-- Requires structured JSON output
-- Prioritizes emergency symptom detection
-- Maintains conservative medical assessments
-- Includes clear probability ratings
-
-### Example LLM Prompt:
-
-**System**: "You are a medical information assistant designed to provide educational information about health symptoms..."
-
-**User**: "Symptoms: persistent cough and shortness of breath\nAge: 30\nGender: Male"
-
-**Output**: Structured JSON with conditions, recommendations, and warnings
-
-## 🎨 User Interface
-
-### Features:
-- **Responsive Design**: Works on desktop, tablet, and mobile
-- **Clear Visual Hierarchy**: Important warnings highlighted
-- **Probability Indicators**: Color-coded probability badges (High/Medium/Low)
-- **Priority System**: Recommendations sorted by priority
-- **Emergency Alerts**: Prominent warnings for urgent conditions
-<!-- No persistent history in this version -->
+## 🎨 UI (brief)
+- Responsive layout, clear warnings, probability badges, and prioritized recommendations.
 
 ## 🔐 Security Considerations
 
@@ -255,87 +185,14 @@ The system uses a carefully crafted system prompt that:
 - No PHI (Protected Health Information) storage beyond session
 - Clear disclaimers on all outputs
 
-## 📁 Project Structure
+## 📁 Structure (brief)
+- `node-backend/` – Express API (`src/app.js`, `src/server.js`)
+- `frontend/` – React app (components, styling)
+- `api/node.js` – Vercel serverless entry forwarding to Express
 
-```
-healthcare-symptom-checker/
-├── api/
-│   └── node.js               # Vercel serverless entry (Node)
-├── node-backend/
-│   ├── package.json
-│   ├── .env.example
-│   └── src/
-│       ├── app.js            # Express app with routes
-│       └── server.js         # Local dev server
-├── frontend/
-│   ├── public/
-│   │   └── index.html
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── DisclaimerBanner.js
-│   │   │   ├── SymptomForm.js
-│   │   │   ├── Results.js
-│   │   │   
-│   │   ├── App.js
-│   │   ├── App.css
-│   │   ├── api.js
-│   │   └── index.js
-│   └── package.json
-├── vercel.json
-└── README.md
-```
-
-## 🎥 Demo Video Script
-
-### Recording Steps:
-
-1. **Introduction** (30 seconds)
-   - Show landing page with disclaimer
-   - Explain educational purpose
-
-2. **Basic Usage** (1 minute)
-   - Enter simple symptoms: "headache and fever"
-   - Show analysis results
-   - Highlight probability ratings
-   - Show recommendations
-
-3. **Advanced Features** (1 minute)
-   - Add age and gender information
-   - Enter more complex symptoms
-   - Show emergency warning detection
- 
-
-4. **Technical Overview** (1 minute)
-  - Hit `/health` to show configuration
-  - Quick code walkthrough
-  - LLM integration explanation
-
-5. **Conclusion** (30 seconds)
-   - Reiterate safety disclaimers
-   - Summary of features
-   - GitHub repository link
-
-### Demo Example Inputs:
-
-**Example 1** (Low severity):
-```
-Symptoms: "mild headache and runny nose for 1 day"
-Expected: Common cold, low-medium probability
-```
-
-**Example 2** (Medium severity):
-```
-Symptoms: "persistent cough, fever 101°F, fatigue for 3 days"
-Age: 45
-Expected: Possible respiratory infection, medium-high probability
-```
-
-**Example 3** (Emergency):
-```
-Symptoms: "severe chest pain, shortness of breath, dizziness"
-Age: 60
-Expected: Emergency warning, immediate medical attention recommended
-```
+## 🎥 Demo tip
+- Under the input, you can add a helper like: 
+  - “Example prompt: Based on these symptoms, suggest possible conditions and next steps with an educational disclaimer.”
 
 ## 🚀 Deployment
 
@@ -343,34 +200,15 @@ Expected: Emergency warning, immediate medical attention recommended
 
 This project is optimized for Vercel (Node serverless) as described above. You can also deploy the Node backend to any Node hosting provider and serve the React frontend with any static host.
 
-## 🛠️ Development
-
-### Adding New Features
-
-1. **New LLM Provider**: Edit `node-backend/src/app.js` (see `analyzeSymptoms`) and add provider logic
-2. **New Endpoints**: Add Express routes in `node-backend/src/app.js`
-3. **UI Components**: Create in `frontend/src/components/`
-4. **Database Models**: Not applicable (no database in this version)
-
-### Code Quality
-
-- Backend: Node + Express best practices (optional ESLint/Prettier)
-- Frontend: React best practices
-- Async/await for all database and LLM operations
-- Comprehensive error handling
+## 🛠️ Development (brief)
+- Backend: Node + Express; Frontend: React. See code comments for details.
 
 ## 📝 License
 
 This project is for educational purposes. Please ensure compliance with medical software regulations if deploying for public use.
 
 ## 🤝 Contributing
-
-This is an educational project. Key areas for improvement:
-- Additional LLM providers
-- Enhanced symptom parsing
-- Multi-language support
-- More sophisticated emergency detection
-- Integration with medical databases
+- PRs welcome for UX, safety messaging, and model prompt refinement.
 
 ## 📧 Support
 
@@ -379,19 +217,10 @@ For issues or questions:
 2. Review the disclaimer and safety information
 3. Consult the code comments for implementation details
 
-## ✅ Evaluation Checklist
-
-- ✅ Accepts symptom text input
-- ✅ Queries LLM for analysis
-- ✅ Returns probable conditions
-- ✅ Provides recommendations
-- ✅ Includes safety disclaimers
-- 
-- ✅ Frontend form interface
-- ✅ Emergency symptom detection
-- ✅ Well-structured code
-- ✅ Comprehensive documentation
-- ✅ Demo-ready
+## ✅ Checklist
+- Input symptoms → LLM analysis → Structured results
+- Probabilities, recommendations, emergency gating
+- Safety disclaimers and no database storage
 
 ---
 
