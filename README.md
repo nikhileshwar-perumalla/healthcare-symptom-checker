@@ -65,6 +65,7 @@ cp .env.example .env
 GOOGLE_API_KEY=your_google_api_key_here
 GOOGLE_MODEL=gemini-2.5-flash
 LLM_PROVIDER=google
+ALLOW_CLIENT_API_KEY=0
 ```
 
 4. Install and run:
