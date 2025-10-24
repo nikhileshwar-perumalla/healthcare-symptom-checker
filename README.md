@@ -1,3 +1,7 @@
+Live app: https://healthcare-symptom-checker-front.vercel.app
+
+Demo video: https://drive.google.com/file/d/1KVuEkQFwS8QvmkxybWkkC5Yij4edwp2l/view?usp=sharing
+
 # 🏥 Healthcare Symptom Checker
 
 An educational AI-powered symptom checker that analyzes user-reported symptoms and provides probable conditions with recommendations. This application uses Gemini (Google AI Studio) exclusively to provide intelligent, contextual medical information for educational purposes only.
